@@ -1,0 +1,17 @@
+numpy<2
+pandas
+matplotlib
+seaborn
+scipy
+scikit-learn
+statsmodels
+pmdarima
+prophet
+xgboost
+lightgbm
+tensorflow-cpu
+shap
+requests
+ipykernel
+papermill
+nbconvert
