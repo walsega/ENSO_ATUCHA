@@ -1,0 +1,49 @@
+name: Actualizar pronóstico diario
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  ejecutar-y-publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar el notebook
+        run: papermill Prediccion_Precipitaciones.ipynb resultado.ipynb --log-output
+
+      - name: Convertir a página web (solo resultados, sin código)
+        run: |
+          mkdir -p sitio
+          jupyter nbconvert --to html --no-input resultado.ipynb --output-dir sitio --output index
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: sitio
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
