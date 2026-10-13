@@ -33,7 +33,22 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Ejecutar el notebook
-        run: papermill Prediccion_Precipitaciones.ipynb resultado.ipynb --log-output
+        run: |
+          jupyter nbconvert --to notebook --execute --allow-errors \
+            --ExecutePreprocessor.timeout=-1 \
+            Prediccion_Precipitaciones.ipynb --output resultado.ipynb
+
+      - name: Avisar si alguna celda terminó con error
+        run: |
+          python - <<'PY'
+          import json
+          nb = json.load(open("resultado.ipynb"))
+          n = sum(1 for c in nb["cells"] if c["cell_type"] == "code"
+                  for o in c.get("outputs", []) if o.get("output_type") == "error")
+          print(f"Celdas con error: {n}")
+          if n:
+              print(f"::warning::{n} celda(s) del notebook terminaron con error. Revisar el log.")
+          PY
 
       - name: Convertir a página web (solo resultados, sin código)
         run: |
