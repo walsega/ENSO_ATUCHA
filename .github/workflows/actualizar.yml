@@ -2,8 +2,8 @@ name: Actualizar pronóstico diario
 
 on:
   schedule:
-    - cron: "0 9 * * *"
-  workflow_dispatch:
+    - cron: "0 9 * * *"      # todos los días 09:00 UTC = 06:00 en Argentina
+  workflow_dispatch:          # permite ejecutarlo a mano desde la pestaña Actions
 
 permissions:
   contents: read
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   ejecutar-y-publicar:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -32,28 +32,58 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
+      # --allow-errors: si una celda falla, el notebook sigue con las demás y la página igual se
+      # publica. timeout=-1: sin límite por celda (el entrenamiento tarda).
       - name: Ejecutar el notebook
         run: |
           jupyter nbconvert --to notebook --execute --allow-errors \
             --ExecutePreprocessor.timeout=-1 \
             Prediccion_Precipitaciones.ipynb --output resultado.ipynb
 
-      - name: Avisar si alguna celda terminó con error
-        run: |
-          python - <<'PY'
-          import json
-          nb = json.load(open("resultado.ipynb"))
-          n = sum(1 for c in nb["cells"] if c["cell_type"] == "code"
-                  for o in c.get("outputs", []) if o.get("output_type") == "error")
-          print(f"Celdas con error: {n}")
-          if n:
-              print(f"::warning::{n} celda(s) del notebook terminaron con error. Revisar el log.")
-          PY
-
       - name: Convertir a página web (solo resultados, sin código)
         run: |
           mkdir -p sitio
           jupyter nbconvert --to html --no-input resultado.ipynb --output-dir sitio --output index
+
+      - name: Agregar aviso de fuentes y fecha a la página
+        run: |
+          python - <<'PY'
+          import json, re, datetime
+          nb = json.load(open("resultado.ipynb"))
+          texto, errores = "", 0
+          for c in nb["cells"]:
+              for o in c.get("outputs", []):
+                  t = o.get("text", "")
+                  texto += "".join(t) if isinstance(t, list) else t
+                  errores += o.get("output_type") == "error"
+          m = re.search(r"FUENTES: precip=(\S+) \| meteo=(\S+) \| hidro=(\S+)", texto)
+          avisos = []
+          if not m:
+              avisos.append(("#b71c1c", "No se pudo verificar de dónde salieron los datos en esta corrida."))
+          else:
+              precip, meteo, hidro = m.groups()
+              if "sintetico" in (precip, meteo):
+                  avisos.append(("#b71c1c", "ATENCIÓN: esta corrida NO pudo descargar datos reales de lluvia o "
+                                 "meteorología. Los resultados son simulados y no sirven para tomar decisiones."))
+              if hidro == "sintetico":
+                  avisos.append(("#e65100", "Nota: el caudal y la altura del río Paraná no tienen fuente pública "
+                                 "automática; son simulados y por eso no se usan para entrenar los modelos."))
+          if errores:
+              avisos.append(("#e65100", f"{errores} sección(es) del análisis no pudieron calcularse en esta corrida."))
+          for color, texto_aviso in avisos:
+              print(f"::warning::{texto_aviso}")
+          ahora = datetime.datetime.now(datetime.timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+          bloque = f'<div style="font-family:sans-serif;padding:10px 16px;background:#eceff1">Última actualización: <b>{ahora}</b></div>'
+          for color, texto_aviso in avisos:
+              bloque += f'<div style="font-family:sans-serif;padding:10px 16px;background:{color};color:#fff">{texto_aviso}</div>'
+          ruta = "sitio/index.html"
+          html = open(ruta, encoding="utf-8").read()
+          html = re.sub(r"<title>.*?</title>", "<title>Pronóstico de precipitaciones Zárate-Lima</title>", html, count=1)
+          i = html.find("<body")
+          j = html.find(">", i) + 1
+          open(ruta, "w", encoding="utf-8").write(html[:j] + bloque + html[j:])
+          print("Aviso agregado:", len(avisos), "aviso(s)")
+          PY
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
